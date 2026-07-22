@@ -10,8 +10,10 @@ namespace PIDReport.Trajectory
     // Each "Pivot" waypoint is the chassis center's position at the START of that pivot
     // (matching the maneuver's literal definition -- rotation about one stationary
     // wheel -- the center necessarily ends up offset from the nominal grid point by
-    // the pivot radius once the turn completes); each following straight targets the
-    // next nominal waypoint from wherever the pivot actually left the robot.
+    // the pivot radius once the turn completes). Each following straight travels at
+    // the FIXED heading the pivot ended at (a robot can't snap heading instantly) for
+    // a distance equal to the projection of (nominal waypoint - actual start) onto
+    // that heading -- landing close to, not exactly on, the nominal grid point.
     public static class CourseTrajectoryPlanner
     {
         // Kept below the 1.00 m/s^2 hard cap to leave headroom for closed-loop tracking
@@ -28,8 +30,7 @@ namespace PIDReport.Trajectory
             Vector3 center = Course.CourseBuilder.RobotSpawnPosition;
             float heading = headingNegX;
 
-            var s1 = new StraightSegment(center, new Vector3(0.30f, 0f, 0.30f), maxAccel);
-            segments.Add(s1);
+            var s1 = AddStraight(segments, center, heading, new Vector3(0.30f, 0f, 0.30f), maxAccel);
             center = s1.EndPosition;
 
             var t1 = new TurnSegment(center, heading, Mathf.PI / 2f, radius, pivotOnRightWheel: true, maxAccel);
@@ -37,8 +38,7 @@ namespace PIDReport.Trajectory
             center = t1.EndPosition;
             heading = t1.EndHeadingRadians;
 
-            var s2 = new StraightSegment(center, new Vector3(0.30f, 0f, 1.50f), maxAccel);
-            segments.Add(s2);
+            var s2 = AddStraight(segments, center, heading, new Vector3(0.30f, 0f, 1.50f), maxAccel);
             center = s2.EndPosition;
 
             var t2 = new TurnSegment(center, heading, Mathf.PI / 2f, radius, pivotOnRightWheel: true, maxAccel);
@@ -46,8 +46,7 @@ namespace PIDReport.Trajectory
             center = t2.EndPosition;
             heading = t2.EndHeadingRadians;
 
-            var s3 = new StraightSegment(center, new Vector3(2.10f, 0f, 1.50f), maxAccel);
-            segments.Add(s3);
+            var s3 = AddStraight(segments, center, heading, new Vector3(2.10f, 0f, 1.50f), maxAccel);
             center = s3.EndPosition;
 
             var t3 = new TurnSegment(center, heading, -Mathf.PI / 2f, radius, pivotOnRightWheel: false, maxAccel);
@@ -55,8 +54,7 @@ namespace PIDReport.Trajectory
             center = t3.EndPosition;
             heading = t3.EndHeadingRadians;
 
-            var s4 = new StraightSegment(center, new Vector3(2.10f, 0f, 2.70f), maxAccel);
-            segments.Add(s4);
+            var s4 = AddStraight(segments, center, heading, new Vector3(2.10f, 0f, 2.70f), maxAccel);
             center = s4.EndPosition;
 
             var t4 = new TurnSegment(center, heading, -Mathf.PI / 2f, radius, pivotOnRightWheel: false, maxAccel);
@@ -65,10 +63,18 @@ namespace PIDReport.Trajectory
             heading = t4.EndHeadingRadians;
 
             // Final approach: continue past the GoalLine (X=1.80) with comfortable clearance.
-            var s5 = new StraightSegment(center, new Vector3(0.90f, 0f, 2.70f), maxAccel);
-            segments.Add(s5);
+            AddStraight(segments, center, heading, new Vector3(0.90f, 0f, 2.70f), maxAccel);
 
             return new RobotTrajectory(segments);
+        }
+
+        private static StraightSegment AddStraight(List<TrajectorySegment> segments, Vector3 start, float heading,
+            Vector3 nominalTarget, float maxAccel)
+        {
+            float length = Vector3.Dot(nominalTarget - start, HeadingUtil.ToForward(heading));
+            var segment = new StraightSegment(start, heading, length, maxAccel);
+            segments.Add(segment);
+            return segment;
         }
     }
 }

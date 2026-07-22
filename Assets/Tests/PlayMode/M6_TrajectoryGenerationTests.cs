@@ -50,6 +50,24 @@ namespace PIDReport.Tests
         }
 
         [Test]
+        public void CourseTrajectory_IsHeadingContinuousAcrossSegmentBoundaries()
+        {
+            var trajectory = CourseTrajectoryPlanner.BuildCourseTrajectory();
+            float t = 0f;
+            foreach (var segment in trajectory.Segments)
+            {
+                t += segment.Duration;
+                if (t >= trajectory.TotalDuration - 1e-4f) continue;
+
+                var justBefore = trajectory.Evaluate(t - 0.0005f);
+                var justAfter = trajectory.Evaluate(t + 0.0005f);
+                float delta = Mathf.DeltaAngle(justBefore.HeadingRadians * Mathf.Rad2Deg, justAfter.HeadingRadians * Mathf.Rad2Deg);
+                Assert.Less(Mathf.Abs(delta), 1f,
+                    "A real robot cannot snap heading instantly -- heading jumped " + delta + " deg at segment boundary t=" + t);
+            }
+        }
+
+        [Test]
         public void CourseTrajectory_ReferenceAccelerationNeverExceedsCap()
         {
             const float maxAccel = 0.6f; // matches a below-default cap so we can also check it's being respected, not just the default

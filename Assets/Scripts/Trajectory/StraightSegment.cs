@@ -2,10 +2,17 @@ using UnityEngine;
 
 namespace PIDReport.Trajectory
 {
-    // A straight-line move at constant heading, with a minimum-jerk (quintic) speed
-    // profile sized so peak acceleration never exceeds maxAccel. Camera-top acceleration
-    // equals chassis acceleration for a straight (no rotation), so this directly respects
-    // the 1.00 m/s^2 cap as long as maxAccel leaves tracking-error headroom under it.
+    // A straight-line move at a FIXED heading (inherited from wherever the previous
+    // segment left off), with a minimum-jerk (quintic) speed profile sized so peak
+    // acceleration never exceeds maxAccel. Camera-top acceleration equals chassis
+    // acceleration for a straight (no rotation), so this directly respects the
+    // 1.00 m/s^2 cap as long as maxAccel leaves tracking-error headroom under it.
+    //
+    // Heading is a constructor parameter, not derived from (start, targetPoint):
+    // a real robot can't instantaneously snap heading at a segment boundary, so this
+    // segment travels `length` along the incoming heading rather than aiming a new
+    // heading at the next nominal waypoint -- it lands close to, but not necessarily
+    // exactly on, that waypoint (see CourseTrajectoryPlanner).
     public class StraightSegment : TrajectorySegment
     {
         private readonly Vector3 start;
@@ -15,13 +22,12 @@ namespace PIDReport.Trajectory
 
         public Vector3 EndPosition => start + direction * length;
 
-        public StraightSegment(Vector3 start, Vector3 end, float maxAccel)
+        public StraightSegment(Vector3 start, float headingRadians, float length, float maxAccel)
         {
             this.start = start;
-            Vector3 delta = end - start;
-            length = delta.magnitude;
-            direction = length > 1e-6f ? delta / length : Vector3.forward;
-            headingRadians = HeadingUtil.FromForward(direction);
+            this.headingRadians = headingRadians;
+            this.length = length;
+            direction = HeadingUtil.ToForward(headingRadians);
             Duration = MinimumJerkProfile.DurationForAccelCap(length, maxAccel);
         }
 
