@@ -1,0 +1,47 @@
+# Unity generated
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]serSettings/
+[Mm]emoryCaptures/
+
+# Unity asset-importer generated
+[Aa]ssets/AssetStoreTools*
+
+# Visual Studio / Rider / VS Code
+.vs/
+.vscode/
+.idea/
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# OS / misc
+.DS_Store
+*.swp
+sysinfo.txt
+crashlytics-build.properties
+
+# Packages lock is kept (deterministic package resolution); Package cache is not
+[Pp]ackages/PackagesCache/
+
+# Claude Code session-local config (not part of the Unity project)
+.claude/
+
+# Large generated deliverables (built separately, not source)
+Deliverables/video/*.mp4
+HeadfulSmokeTest*/

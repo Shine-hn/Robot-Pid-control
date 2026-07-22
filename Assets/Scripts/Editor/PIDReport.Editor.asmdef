@@ -1,0 +1,18 @@
+{
+    "name": "PIDReport.Editor",
+    "rootNamespace": "PIDReport.Editor",
+    "references": [
+        "PIDReport.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
