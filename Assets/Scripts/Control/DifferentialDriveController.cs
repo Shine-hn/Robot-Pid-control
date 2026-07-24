@@ -38,19 +38,24 @@ namespace PIDReport.Control
         public float LinearGain = 300f;
         public float AngularGain = 3f;
 
-        // Real motor controllers always saturate; this one should too. Without a cap,
-        // a large instantaneous velocity error (e.g. a step command from rest) produces
-        // a large instantaneous force which, applied to a chassis whose centerOfMass sits
-        // 0.5m above a ~0.15m-radius support footprint, can exceed what the floor contact
-        // patch can react without the chassis tipping -- a real "zero moment point" limit,
-        // not a numerical artifact: for a horizontal acceleration `a`, the required contact
-        // point shifts by a*CoMHeight/g from center, and once that exceeds the footprint
-        // radius the robot tips regardless of how "correct" the driving force direction is.
-        // 1.5 m/s^2 leaves comfortable margin under the ~2.94 m/s^2 theoretical limit here
-        // (0.15 * 9.81 / 0.5), and still well under it once closed-loop tracking error is
-        // added on top during the real race.
+        // Real motor controllers always saturate; this one should too, both to guard
+        // against a "zero moment point" tip-over (centerOfMass 0.5m above a ~0.15m-radius
+        // support footprint tips at roughly 0.15*9.81/0.5 ~= 2.94 m/s^2) and as a backstop
+        // against a runaway torque/force during an abnormally large transient error.
+        //
+        // These are NOT sized directly against the 1.00 m/s^2 camera-top cap, though --
+        // that would be self-defeating: the M6 trajectory generator already sizes turn
+        // duration so the REFERENCE profile's own peak angular acceleration (which, for
+        // this course's 90-degree pivots, reaches ~5-6 rad/s^2) keeps combined camera-top
+        // acceleration at exactly the configured cap. If this controller's own authority
+        // is clamped below what the reference itself requires, it can't even follow the
+        // safe profile it was given, let alone correct tracking error on top of it --
+        // tried exactly that (0.6 m/s^2 / 3.0 rad/s^2) and the robot fell tens of degrees
+        // behind the planned heading and drifted into a wall. The clamp needs headroom
+        // *above* the reference's own peak requirement, wide enough that ordinary tracking
+        // never saturates it, while still catching genuinely pathological errors.
         public float MaxAcceleration = 1.5f;
-        public float MaxAngularAcceleration = 10f;
+        public float MaxAngularAcceleration = 15f;
 
         private RobotRig rig;
         private float wheelSpeedLeft;
@@ -86,7 +91,8 @@ namespace PIDReport.Control
 
             float currentAngVelY = rb.angularVelocity.y;
             float angError = omega - currentAngVelY;
-            float torque = Mathf.Clamp(angError * AngularGain, -MaxAngularAcceleration, MaxAngularAcceleration);
+            float maxTorque = MaxAngularAcceleration * rb.inertiaTensor.y;
+            float torque = Mathf.Clamp(angError * AngularGain, -maxTorque, maxTorque);
             rb.AddTorque(Vector3.up * torque, ForceMode.Force);
         }
     }
