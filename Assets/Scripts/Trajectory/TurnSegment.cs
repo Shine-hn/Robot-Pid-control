@@ -19,8 +19,16 @@ namespace PIDReport.Trajectory
         public Vector3 EndPosition { get; }
         public float EndHeadingRadians => startHeadingRadians + deltaHeadingRadians;
 
+        // Angular-acceleration budget used to size SPIN turns (radius 0), where the linear
+        // acceleration cap provides no constraint at all. Chosen to keep a 90-degree spin at
+        // almost exactly the duration the equivalent pivot took (~1.0 s), so switching to
+        // spins costs no course time, while staying well under the drive controller's
+        // 15 rad/s^2 authority so ordinary tracking never saturates it.
+        public const float DefaultMaxAngularAccel = 9.0f;
+
         public TurnSegment(Vector3 centerStart, float startHeadingRadians, float deltaHeadingRadians,
-            float radius, bool pivotOnRightWheel, float maxAccel)
+            float radius, bool pivotOnRightWheel, float maxAccel,
+            float maxAngularAccel = DefaultMaxAngularAccel)
         {
             this.startHeadingRadians = startHeadingRadians;
             this.deltaHeadingRadians = deltaHeadingRadians;
@@ -39,7 +47,7 @@ namespace PIDReport.Trajectory
                 startRadialDir = Vector3.zero;
             }
 
-            Duration = ComputeDuration(radius, deltaHeadingRadians, maxAccel);
+            Duration = ComputeDuration(radius, deltaHeadingRadians, maxAccel, maxAngularAccel);
             EndPosition = Evaluate(Duration).Position;
         }
 
@@ -77,9 +85,22 @@ namespace PIDReport.Trajectory
         // scale as 1/T^2, so the combined peak scales exactly as 1/T^2 too -- sample once
         // at a reference T=1s and solve for the T that brings that peak down to maxAccel,
         // rather than an iterative search.
-        private static float ComputeDuration(float radius, float deltaHeading, float maxAccel)
+        private static float ComputeDuration(float radius, float deltaHeading, float maxAccel,
+            float maxAngularAccel)
         {
             if (Mathf.Abs(deltaHeading) < 1e-6f) return 0f;
+
+            // Spin turn: the camera-top point sits ON the yaw axis, so a pure yaw produces
+            // NO horizontal translation there -- the 1.00 m/s^2 cap does not constrain this
+            // maneuver at all, and both the centripetal and tangential terms below would
+            // evaluate to zero, collapsing the duration to zero (an instantaneous turn
+            // demanding infinite torque). Size it by angular acceleration instead:
+            // minimum-jerk peak angular acceleration = |dtheta| * 5.7735 / T^2.
+            if (radius <= 1e-6f)
+            {
+                return Mathf.Sqrt(Mathf.Abs(deltaHeading) *
+                                  MinimumJerkProfile.PeakAccelerationFactor / maxAngularAccel);
+            }
 
             float peakAccelAtUnitDuration = 0f;
             const int samples = 200;

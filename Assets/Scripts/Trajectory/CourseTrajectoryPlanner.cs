@@ -20,9 +20,26 @@ namespace PIDReport.Trajectory
         // error on top of the reference trajectory's own kinematic acceleration.
         public const float DefaultMaxAccel = 0.7f;
 
+        // Corners use 超信地旋回 (spin turns, zero radius) rather than 信地旋回 (pivot about
+        // one wheel, radius = TrackWidth/2 = 0.12 m). A pivot swings the chassis CENTRE
+        // 0.12 m sideways: entering the first corner on the corridor centreline at x = 0.30
+        // it lands the centre at x = 0.18, putting the body's edge 0.030 m from WallWest --
+        // a 3 cm margin that any tracking disturbance consumes (measured: it did, repeatedly,
+        // once wheel/floor friction was introduced). A spin keeps the centre fixed, so the
+        // robot stays on the corridor centreline with the full 0.15 m of clearance, and the
+        // straights then land exactly on their nominal waypoints instead of 0.12 m off them.
+        //
+        // Spins are also cheaper against the acceleration budget: the camera-top point sits
+        // on the yaw axis, so a spin contributes essentially NO camera-top acceleration,
+        // whereas a pivot's centripetal + tangential terms did. Duration is matched to the
+        // old pivots (~1.0 s for 90 degrees) so this costs no course time.
+        // 信地旋回 remains fully supported by TurnSegment and covered by the M3 tests --
+        // it is a required capability, just not the fastest way around this particular course.
+        private const float SpinTurnRadius = 0f;
+
         public static RobotTrajectory BuildCourseTrajectory(float maxAccel = DefaultMaxAccel)
         {
-            float radius = RobotRig.TrackWidth * 0.5f;
+            float radius = SpinTurnRadius;
             float headingNegX = HeadingUtil.FromForward(Vector3.left);
 
             var segments = new List<TrajectorySegment>();

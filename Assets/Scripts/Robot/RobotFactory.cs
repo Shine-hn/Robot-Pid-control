@@ -45,20 +45,30 @@ namespace PIDReport.Robot
             bodyCollider.sharedMesh = GenerateCylinderColliderMesh(32);
             bodyCollider.convex = true;
 
-            // The drive controller's chassis force already IS the abstracted net
-            // wheel-traction force ("sufficient friction for traction is assumed" --
-            // brief). Unity's default PhysicsMaterial has nonzero friction, which would
-            // additionally treat the chassis as a block sliding against the floor and
-            // resist that force on top of it -- effectively double-counting resistance
-            // the brief says to ignore ("ignore rolling resistance"), and strong enough
-            // (with this robot's weight) to fully cancel a safely torque-limited drive
-            // force. Zero it out so the floor/walls only constrain motion, never resist it.
-            bodyCollider.material = new PhysicsMaterial("Frictionless")
+            // Wheel/floor contact friction. The assignment requires that "駆動に必要な摩擦"
+            // (the friction needed to drive) exists between wheels and floor, while
+            // explicitly permitting rolling resistance and similar minor losses to be
+            // ignored. Both halves matter here:
+            //
+            //  * Nonzero friction is declared so the contact genuinely models a gripping
+            //    wheel/floor pair rather than a frictionless puck.
+            //  * It is kept modest, and the drive controller feed-forward cancels the
+            //    resulting sliding drag (see DifferentialDriveController.GroundFriction-
+            //    Coefficient), because this model represents the wheels as ROLLING: a
+            //    rolling wheel's contact patch has no relative sliding velocity, so real
+            //    traction friction transmits drive force without dissipating energy.
+            //    Unity has no rolling constraint on a plain collider, so without that
+            //    cancellation the solver would charge the body sliding losses the
+            //    assignment says to ignore.
+            //
+            // The coefficient is duplicated in DifferentialDriveController; keep them in
+            // sync or the feed-forward under/over-compensates.
+            bodyCollider.material = new PhysicsMaterial("WheelFloorTraction")
             {
-                dynamicFriction = 0f,
-                staticFriction = 0f,
+                dynamicFriction = RobotRig.WheelFloorFriction,
+                staticFriction = RobotRig.WheelFloorStaticFriction,
                 bounciness = 0f,
-                frictionCombine = PhysicsMaterialCombine.Minimum,
+                frictionCombine = PhysicsMaterialCombine.Average,
                 bounceCombine = PhysicsMaterialCombine.Minimum
             };
 

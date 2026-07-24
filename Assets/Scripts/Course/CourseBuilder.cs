@@ -63,6 +63,20 @@ namespace PIDReport.Course
             floor.transform.SetParent(parent, false);
             floor.transform.localPosition = new Vector3(1.20f, -0.05f, 1.50f);
             floor.transform.localScale = new Vector3(2.60f, 0.10f, 3.20f); // top face at Y=0
+
+            // The wheel/floor friction pair must be declared on BOTH surfaces. Leaving the
+            // floor on Unity's default material (mu = 0.6) and combining with Average
+            // silently produced mu = (0.12 + 0.6)/2 = 0.36 -- about 35 N of stiction against
+            // a 15 N drive clamp, which pinned the robot in place. Both surfaces now carry
+            // the same declared coefficients, so the combine mode cannot distort them.
+            floor.GetComponent<Collider>().material = new PhysicsMaterial("WheelFloorTraction")
+            {
+                dynamicFriction = Robot.RobotRig.WheelFloorFriction,
+                staticFriction = Robot.RobotRig.WheelFloorStaticFriction,
+                bounciness = 0f,
+                frictionCombine = PhysicsMaterialCombine.Average,
+                bounceCombine = PhysicsMaterialCombine.Minimum
+            };
         }
 
         private static void BuildWall(WallSpec w, Transform parent)
