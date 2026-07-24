@@ -97,7 +97,9 @@ namespace PIDReport.Tests
         [UnityTest]
         public IEnumerator StartLineTouch_StartsTheClock()
         {
-            extra = BuildStandaloneLine("StartLine", new Vector3(0f, 0.6f, 0f), new Vector3(0.02f, 1.2f, 0.6f));
+            // Line slab must be thin along the direction of travel (+Z here), matching how
+            // the real course lays out Start/Goal perpendicular to the corridor.
+            extra = BuildStandaloneLine("StartLine", new Vector3(0f, 0.6f, 0f), new Vector3(0.6f, 1.2f, 0.02f));
             var raceManager = BuildRobotWithRaceManager(new Vector3(0f, 0f, -0.5f), Quaternion.identity);
             var drive = robot.AddComponent<DifferentialDriveController>();
             drive.SetWheelSpeeds(0.3f, 0.3f); // heading +Z, straight into the line
@@ -122,8 +124,8 @@ namespace PIDReport.Tests
             // the brief: timing runs StartLine touch -> GoalLine full clearance, not just
             // "touched a GoalLine-tagged object in isolation") -- so this needs both lines
             // on the path, not just a GoalLine by itself.
-            extra = BuildStandaloneLine("StartLine", new Vector3(0f, 0.6f, -0.2f), new Vector3(0.02f, 1.2f, 0.2f));
-            extra2 = BuildStandaloneLine("GoalLine", new Vector3(0f, 0.6f, 0.4f), new Vector3(0.02f, 1.2f, 0.6f));
+            extra = BuildStandaloneLine("StartLine", new Vector3(0f, 0.6f, -0.2f), new Vector3(0.6f, 1.2f, 0.02f));
+            extra2 = BuildStandaloneLine("GoalLine", new Vector3(0f, 0.6f, 0.4f), new Vector3(0.6f, 1.2f, 0.02f));
             var raceManager = BuildRobotWithRaceManager(new Vector3(0f, 0f, -0.5f), Quaternion.identity);
             var drive = robot.AddComponent<DifferentialDriveController>();
             drive.SetWheelSpeeds(0.3f, 0.3f); // heading +Z, drives straight through both lines
@@ -139,6 +141,42 @@ namespace PIDReport.Tests
             Assert.IsTrue(finished, "Fully crossing the GoalLine should stop the clock.");
             Assert.Greater(raceManager.FinishTime, raceManager.StartTime);
             Assert.Greater(raceManager.CourseTime, 0f);
+        }
+
+        [UnityTest]
+        public IEnumerator GoalLineBackingOut_DoesNotStopTheClock()
+        {
+            // The assignment finishes the run only once the device has passed BEYOND the
+            // goal line and fully separated ("ゴールのラインを超えて完全に離れた時点").
+            // Entering the line and then reversing back out the same side leaves the line
+            // uncrossed, so the clock must keep running.
+            extra = BuildStandaloneLine("StartLine", new Vector3(0f, 0.6f, -0.6f), new Vector3(0.6f, 1.2f, 0.02f));
+            extra2 = BuildStandaloneLine("GoalLine", new Vector3(0f, 0.6f, 0.4f), new Vector3(0.6f, 1.2f, 0.02f));
+            var raceManager = BuildRobotWithRaceManager(new Vector3(0f, 0f, -0.9f), Quaternion.identity);
+            var drive = robot.AddComponent<DifferentialDriveController>();
+
+            // Forward until the body is touching the goal line, but not through it.
+            drive.SetWheelSpeeds(0.3f, 0.3f);
+            bool touchedGoal = false;
+            for (int i = 0; i < 400 && !touchedGoal; i++)
+            {
+                yield return new WaitForFixedUpdate();
+                touchedGoal = robot.transform.position.z > 0.30f;
+            }
+            Assert.IsTrue(raceManager.RaceStarted, "Should have started via the StartLine on the way in.");
+            Assert.IsTrue(touchedGoal, "Robot never reached the goal line to begin with.");
+            Assert.IsFalse(raceManager.RaceFinished, "Merely touching the goal line must not finish the run.");
+
+            // Now reverse back out the way it came -- same side, so NOT a crossing.
+            drive.SetWheelSpeeds(-0.3f, -0.3f);
+            for (int i = 0; i < 400; i++)
+            {
+                yield return new WaitForFixedUpdate();
+                if (robot.transform.position.z < -0.1f) break;
+            }
+
+            Assert.IsFalse(raceManager.RaceFinished,
+                "Backing out of the goal line on the entry side must NOT stop the clock.");
         }
 
         private GameObject BuildStandaloneLine(string tag, Vector3 position, Vector3 size)

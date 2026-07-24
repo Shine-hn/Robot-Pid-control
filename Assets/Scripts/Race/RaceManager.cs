@@ -51,7 +51,10 @@ namespace PIDReport.Race
             if (goalLine != null)
             {
                 var trigger = goalLine.GetComponent<LineTrigger>();
-                if (trigger != null) trigger.Exited += OnGoalLineExited;
+                // CrossedThrough, not Exited: the assignment stops the clock only once the
+                // device has passed BEYOND the goal line and fully separated from it, so
+                // reversing back out of the line must not count as a finish.
+                if (trigger != null) trigger.CrossedThrough += OnGoalLineCrossed;
             }
         }
 
@@ -96,7 +99,7 @@ namespace PIDReport.Race
             }
         }
 
-        private void OnGoalLineExited(Collider other)
+        private void OnGoalLineCrossed(Collider other)
         {
             if (RaceStarted && !RaceFinished)
             {

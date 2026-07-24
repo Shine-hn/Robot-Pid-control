@@ -58,6 +58,7 @@ namespace PIDReport.App
         private bool exitWhenDone;
         private bool done;
         private string csvPath;
+        private string summaryPath;
 
         void Start()
         {
@@ -121,6 +122,26 @@ namespace PIDReport.App
 
             Directory.CreateDirectory(outputDir);
             csvPath = Path.Combine(outputDir, "telemetry.csv");
+            summaryPath = Path.Combine(outputDir, "run_summary.json");
+        }
+
+        // Values the telemetry CSV cannot express on its own. Most importantly 走破時間:
+        // the CSV spans the WHOLE simulation (spawn runway + post-goal tail), so its last
+        // timestamp is NOT the course time. Only RaceManager knows the StartLine-touch to
+        // GoalLine-clearance interval, so it is published here for the metrics report
+        // rather than being re-derived (incorrectly) downstream.
+        [Serializable]
+        private class RunSummary
+        {
+            public float courseTimeSeconds;
+            public float startTimeSeconds;
+            public float finishTimeSeconds;
+            public float fixedTimestepSeconds;
+            public float telemetryDurationSeconds;
+            public bool raceStarted;
+            public bool raceFinished;
+            public bool invalidated;
+            public string invalidationReason;
         }
 
         private IEnumerator RunToCompletion()
@@ -156,6 +177,20 @@ namespace PIDReport.App
             if (capture != null) capture.End();
 
             telemetry.WriteCsv(csvPath);
+
+            var summary = new RunSummary
+            {
+                courseTimeSeconds = raceManager.CourseTime,
+                startTimeSeconds = raceManager.StartTime,
+                finishTimeSeconds = raceManager.FinishTime,
+                fixedTimestepSeconds = Time.fixedDeltaTime,
+                telemetryDurationSeconds = telemetry.RowCount * Time.fixedDeltaTime,
+                raceStarted = raceManager.RaceStarted,
+                raceFinished = raceManager.RaceFinished,
+                invalidated = raceManager.IsInvalidated,
+                invalidationReason = raceManager.InvalidationReason ?? ""
+            };
+            File.WriteAllText(summaryPath, JsonUtility.ToJson(summary, true));
 
             Debug.Log("SimulationRunner finished: " +
                       "finished=" + raceManager.RaceFinished +
