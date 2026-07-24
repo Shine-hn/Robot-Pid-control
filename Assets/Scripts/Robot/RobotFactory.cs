@@ -25,6 +25,23 @@ namespace PIDReport.Robot
             meshCollider.sharedMesh = body.GetComponent<MeshFilter>().sharedMesh;
             meshCollider.convex = true;
 
+            // The drive controller's chassis force already IS the abstracted net
+            // wheel-traction force ("sufficient friction for traction is assumed" --
+            // brief). Unity's default PhysicsMaterial has nonzero friction, which would
+            // additionally treat the chassis as a block sliding against the floor and
+            // resist that force on top of it -- effectively double-counting resistance
+            // the brief says to ignore ("ignore rolling resistance"), and strong enough
+            // (with this robot's weight) to fully cancel a safely torque-limited drive
+            // force. Zero it out so the floor/walls only constrain motion, never resist it.
+            meshCollider.material = new PhysicsMaterial("Frictionless")
+            {
+                dynamicFriction = 0f,
+                staticFriction = 0f,
+                bounciness = 0f,
+                frictionCombine = PhysicsMaterialCombine.Minimum,
+                bounceCombine = PhysicsMaterialCombine.Minimum
+            };
+
             var wheelLeft = CreateWheel("WheelLeft", root.transform, -RobotRig.TrackWidth * 0.5f);
             var wheelRight = CreateWheel("WheelRight", root.transform, RobotRig.TrackWidth * 0.5f);
 
@@ -43,7 +60,14 @@ namespace PIDReport.Robot
 
             var rb = root.AddComponent<Rigidbody>();
             rb.mass = RobotRig.TotalMass;
-            rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+            // ContinuousDynamic (avoids tunneling through OTHER fast-moving dynamic
+            // rigidbodies too) was tried first, but that combined with a convex
+            // MeshCollider silently suppressed OnCollisionEnter/Stay dispatch entirely
+            // while still resolving the contact physically -- a known-flaky combination.
+            // The only tunneling concern here is a single dynamic robot against static
+            // course geometry, which plain Continuous mode (sweeps against static
+            // colliders only) covers correctly and reliably delivers collision events for.
+            rb.collisionDetectionMode = CollisionDetectionMode.Continuous;
             rb.interpolation = RigidbodyInterpolation.Interpolate;
             rb.isKinematic = false;
 

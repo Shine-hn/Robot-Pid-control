@@ -38,6 +38,20 @@ namespace PIDReport.Control
         public float LinearGain = 300f;
         public float AngularGain = 3f;
 
+        // Real motor controllers always saturate; this one should too. Without a cap,
+        // a large instantaneous velocity error (e.g. a step command from rest) produces
+        // a large instantaneous force which, applied to a chassis whose centerOfMass sits
+        // 0.5m above a ~0.15m-radius support footprint, can exceed what the floor contact
+        // patch can react without the chassis tipping -- a real "zero moment point" limit,
+        // not a numerical artifact: for a horizontal acceleration `a`, the required contact
+        // point shifts by a*CoMHeight/g from center, and once that exceeds the footprint
+        // radius the robot tips regardless of how "correct" the driving force direction is.
+        // 1.5 m/s^2 leaves comfortable margin under the ~2.94 m/s^2 theoretical limit here
+        // (0.15 * 9.81 / 0.5), and still well under it once closed-loop tracking error is
+        // added on top during the real race.
+        public float MaxAcceleration = 1.5f;
+        public float MaxAngularAcceleration = 10f;
+
         private RobotRig rig;
         private float wheelSpeedLeft;
         private float wheelSpeedRight;
@@ -67,11 +81,13 @@ namespace PIDReport.Control
             Vector3 currentVel = rb.linearVelocity;
             currentVel.y = 0f;
             Vector3 velError = desiredVel - currentVel;
-            rb.AddForce(velError * LinearGain, ForceMode.Force);
+            Vector3 force = Vector3.ClampMagnitude(velError * LinearGain, MaxAcceleration * rb.mass);
+            rb.AddForce(force, ForceMode.Force);
 
             float currentAngVelY = rb.angularVelocity.y;
             float angError = omega - currentAngVelY;
-            rb.AddTorque(Vector3.up * angError * AngularGain, ForceMode.Force);
+            float torque = Mathf.Clamp(angError * AngularGain, -MaxAngularAcceleration, MaxAngularAcceleration);
+            rb.AddTorque(Vector3.up * torque, ForceMode.Force);
         }
     }
 }

@@ -84,6 +84,7 @@ namespace PIDReport.Course
             var box = go.AddComponent<BoxCollider>();
             box.size = size;
             box.isTrigger = true;
+            go.AddComponent<LineTrigger>();
         }
     }
 }
