@@ -45,6 +45,30 @@ namespace PIDReport.Tests
             Assert.Less(yawDrift, 2f, "Equal wheel speeds should not produce meaningful rotation.");
         }
 
+        // 後退: the assignment requires reverse as one of the five mandatory maneuvers
+        // (前進/後退/停止/信地旋回/超信地旋回). Equal NEGATIVE wheel speeds must drive the
+        // body backwards along its own -forward axis without yawing.
+        [UnityTest]
+        public IEnumerator Backward_MovesBackwardWithoutRotating()
+        {
+            Build();
+            drive.SetWheelSpeeds(-0.3f, -0.3f);
+
+            Quaternion startRot = robot.transform.rotation;
+            Vector3 startPos = robot.transform.position;
+
+            for (int i = 0; i < 120; i++) yield return new WaitForFixedUpdate();
+
+            Vector3 delta = robot.transform.position - startPos;
+            float forwardMoved = Vector3.Dot(delta, Vector3.forward);
+            float yawDrift = Quaternion.Angle(startRot, robot.transform.rotation);
+
+            Assert.Less(forwardMoved, -0.02f,
+                "Equal negative wheel speeds should drive the robot backwards (負の前進方向).");
+            Assert.Less(yawDrift, 2f,
+                "Equal negative wheel speeds should not produce meaningful rotation.");
+        }
+
         [UnityTest]
         public IEnumerator PivotTurn_LeftWheelStationary_StaysNearLeftWheelGroundPoint()
         {

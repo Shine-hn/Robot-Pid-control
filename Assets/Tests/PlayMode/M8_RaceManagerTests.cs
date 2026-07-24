@@ -143,6 +143,45 @@ namespace PIDReport.Tests
             Assert.Greater(raceManager.CourseTime, 0f);
         }
 
+        // 壁の通過 (wall passthrough) must be impossible, and any wall interaction must
+        // invalidate. This is the Continuous-collision-detection regression test: with a
+        // ~2 m runway and the drive clamp at 1.5 m/s^2 the robot reaches ~2.5 m/s, which at
+        // the 0.02 s fixed step is ~0.05 m of travel per step -- the same order as the
+        // wall's own 0.05 m thickness. Discrete collision detection would let that step
+        // straddle the wall entirely and pass through; Continuous must not.
+        [UnityTest]
+        public IEnumerator HighSpeedWallImpact_DoesNotTunnelThrough_AndInvalidates()
+        {
+            course = CourseBuilder.BuildCourse();
+            // z = 1.50 threads the gap between LowerBlock (z<=1.2) and UpperBlock (z>=1.8),
+            // giving a clear straight run at WallWest (inner face x = 0.0).
+            var raceManager = BuildRobotWithRaceManager(new Vector3(2.20f, 0f, 1.50f),
+                CourseBuilder.RobotSpawnRotation, useGravity: true);
+            var drive = robot.AddComponent<DifferentialDriveController>();
+            drive.SetWheelSpeeds(3.0f, 3.0f); // full-tilt at the wall
+
+            float maxSpeed = 0f;
+            float minX = float.MaxValue;
+            var body = robot.GetComponent<RobotRig>().Body;
+
+            for (int i = 0; i < 300; i++)
+            {
+                yield return new WaitForFixedUpdate();
+                maxSpeed = Mathf.Max(maxSpeed, new Vector2(body.linearVelocity.x, body.linearVelocity.z).magnitude);
+                minX = Mathf.Min(minX, body.transform.position.x);
+                if (raceManager.IsInvalidated && body.linearVelocity.magnitude < 0.05f) break;
+            }
+
+            Assert.Greater(maxSpeed, 2.0f,
+                "Test is only meaningful in the tunneling-risk regime; robot never got fast enough (" +
+                maxSpeed + " m/s).");
+            Assert.IsTrue(raceManager.IsInvalidated,
+                "Driving into a wall at speed must invalidate the run.");
+            Assert.Greater(minX, 0.0f,
+                "Robot tunnelled through WallWest (inner face x=0.0, min centre x reached " + minX +
+                "). Continuous collision detection is not preventing passthrough.");
+        }
+
         [UnityTest]
         public IEnumerator GoalLineBackingOut_DoesNotStopTheClock()
         {

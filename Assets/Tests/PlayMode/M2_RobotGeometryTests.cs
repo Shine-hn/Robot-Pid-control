@@ -58,6 +58,22 @@ namespace PIDReport.Tests
             Assert.AreEqual(1.00f, rig.CameraTop.position.y, 0.0001f);
         }
 
+        // Measures the AS-BUILT physics footprint rather than re-reading the constant the
+        // factory was fed: the collider is a generated 32-sided convex hull scaled by the
+        // body transform, so this is the assertion that actually proves 直径 0.30 m.
+        [Test]
+        public void CreateRobot_BodyDiameterMatchesSpec()
+        {
+            robot = RobotFactory.CreateRobot(Vector3.zero, Quaternion.identity);
+            var collider = robot.GetComponentInChildren<Collider>();
+            Bounds b = collider.bounds;
+
+            // 32-sided polygon with a vertex on the +X axis => the AABB touches the true
+            // 0.15 m radius exactly on X; Z is at worst a half-facet short (cos(pi/32)).
+            Assert.AreEqual(0.30f, b.size.x, 0.005f, "Body diameter along X must be 0.30 m.");
+            Assert.AreEqual(0.30f, b.size.z, 0.005f, "Body diameter along Z must be 0.30 m.");
+        }
+
         [UnityTest]
         public IEnumerator RealRobotGeometry_StillMovesUnderAddForce()
         {
