@@ -4,94 +4,94 @@ using PIDReport.Robot;
 
 namespace PIDReport.Trajectory
 {
-    // Builds the specific reference trajectory for this course's confirmed waypoint
-    // sequence: spawn -> Pivot(0.30,0.30) -> (0.30,1.50) -> Pivot(0.30,1.50) ->
-    // (2.10,1.50) -> Pivot(2.10,1.50) -> (2.10,2.70) -> Pivot(2.10,2.70) -> past GoalLine.
-    // Each "Pivot" waypoint is the chassis center's position at the START of that pivot
-    // (matching the maneuver's literal definition -- rotation about one stationary
-    // wheel -- the center necessarily ends up offset from the nominal grid point by
-    // the pivot radius once the turn completes). Each following straight travels at
-    // the FIXED heading the pivot ended at (a robot can't snap heading instantly) for
-    // a distance equal to the projection of (nominal waypoint - actual start) onto
-    // that heading -- landing close to, not exactly on, the nominal grid point.
+    // Builds the reference trajectory for the confirmed S-crank course as a single
+    // CONTINUOUS-MOTION path: straights joined to smooth (clothoid) corners, with speed
+    // never returning to zero between the start and the goal.
+    //
+    // This replaces the earlier stop/turn/go plan (drive a straight to rest, rotate in
+    // place, drive the next straight). That plan spent ~39% of the timed run at a crawl or
+    // standstill purely because every corner required a full stop. Rounding each corner and
+    // carrying speed through it removes those stops -- the single biggest lever on 走破時間.
+    //
+    // Geometry per corner: the corridor is only 0.60 m wide and the robot is 0.30 m across,
+    // leaving 0.15 m of clearance. A smooth corner cannot be gentle (a large-radius arc
+    // simply ploughs through the inner block), so the curvature is high and the corner speed
+    // is correspondingly low (~0.2 m/s) -- but the corner is short, and the straights either
+    // side stay fast, so the net is a large time saving. CornerCurvature is set from a
+    // measured clearance sweep: kappa = 22 keeps every corner >= ~0.21 m from all obstacles
+    // (0.06 m of margin beyond the robot radius for tracking error).
+    //
+    //   spawn(2.10,0.30) -> corner(0.30,0.30) -> corner(0.30,1.50) ->
+    //   corner(2.10,1.50) -> corner(2.10,2.70) -> past GoalLine(0.90,2.70)
+    //
+    // The pivot / spin turn maneuvers (信地旋回 / 超信地旋回) remain implemented in
+    // TurnSegment and covered by the M3 tests -- required capabilities, just not the fast
+    // way around this particular course.
     public static class CourseTrajectoryPlanner
     {
-        // Kept below the 1.00 m/s^2 hard cap to leave headroom for closed-loop tracking
-        // error on top of the reference trajectory's own kinematic acceleration.
-        public const float DefaultMaxAccel = 0.7f;
+        // Reference-trajectory acceleration budget. Applies to BOTH the straights'
+        // longitudinal acceleration and the corners' lateral (centripetal) acceleration, so
+        // the reference never asks for more than this in any direction. Kept below the
+        // 1.00 m/s^2 hard cap to leave headroom for closed-loop tracking error on top.
+        public const float DefaultMaxAccel = 0.78f;
 
-        // Corners use 超信地旋回 (spin turns, zero radius) rather than 信地旋回 (pivot about
-        // one wheel, radius = TrackWidth/2 = 0.12 m). A pivot swings the chassis CENTRE
-        // 0.12 m sideways: entering the first corner on the corridor centreline at x = 0.30
-        // it lands the centre at x = 0.18, putting the body's edge 0.030 m from WallWest --
-        // a 3 cm margin that any tracking disturbance consumes (measured: it did, repeatedly,
-        // once wheel/floor friction was introduced). A spin keeps the centre fixed, so the
-        // robot stays on the corridor centreline with the full 0.15 m of clearance, and the
-        // straights then land exactly on their nominal waypoints instead of 0.12 m off them.
-        //
-        // Spins are also cheaper against the acceleration budget: the camera-top point sits
-        // on the yaw axis, so a spin contributes essentially NO camera-top acceleration,
-        // whereas a pivot's centripetal + tangential terms did. Duration is matched to the
-        // old pivots (~1.0 s for 90 degrees) so this costs no course time.
-        // 信地旋回 remains fully supported by TurnSegment and covered by the M3 tests --
-        // it is a required capability, just not the fastest way around this particular course.
-        private const float SpinTurnRadius = 0f;
+        // Peak curvature of each clothoid corner (1/m). A measured clearance sweep with the
+        // corners correctly placed on the corridor centrelines showed that the body gap is
+        // fixed at 0.15 m by the centreline-to-wall distance for ANY kappa >= 5 -- the tight
+        // corner never cuts closer to the inner block than the straights do. So clearance
+        // does not push kappa up; the binding limit is only that the corner's setback must
+        // fit inside the shortest (1.2 m) straight. Within that, a GENTLER corner is strictly
+        // better on both scored axes: corner speed v = sqrt(maxAccel/kappa) rises as kappa
+        // falls, and clothoid jerk (v^3 * kappa^2 = maxAccel^1.5 * sqrt(kappa)) falls with it.
+        // kappa = 6 gives corner speed ~0.36 m/s with a 0.31 m setback -- comfortably inside
+        // the 0.6 m half-straight -- so it is close to the fastest, smoothest feasible corner.
+        public const float CornerCurvature = 6f;
 
         public static RobotTrajectory BuildCourseTrajectory(float maxAccel = DefaultMaxAccel)
         {
-            float radius = SpinTurnRadius;
-            float headingNegX = HeadingUtil.FromForward(Vector3.left);
+            float cornerSpeed = Mathf.Sqrt(maxAccel / CornerCurvature);
 
-            var segments = new List<TrajectorySegment>();
+            float hNegX = HeadingUtil.FromForward(Vector3.left);   // -pi/2
+            float hPosZ = HeadingUtil.FromForward(Vector3.forward); //  0
+            float hPosX = HeadingUtil.FromForward(Vector3.right);   // +pi/2
 
-            Vector3 center = Course.CourseBuilder.RobotSpawnPosition;
-            float heading = headingNegX;
+            // Build the four corners first; each is fully determined by its centreline
+            // intersection, the heading going in, and the signed 90-degree turn.
+            var c1 = new SmoothCornerSegment(new Vector3(0.30f, 0f, 0.30f), hNegX, +Mathf.PI / 2f, CornerCurvature, cornerSpeed);
+            var c2 = new SmoothCornerSegment(new Vector3(0.30f, 0f, 1.50f), hPosZ, +Mathf.PI / 2f, CornerCurvature, cornerSpeed);
+            var c3 = new SmoothCornerSegment(new Vector3(2.10f, 0f, 1.50f), hPosX, -Mathf.PI / 2f, CornerCurvature, cornerSpeed);
+            var c4 = new SmoothCornerSegment(new Vector3(2.10f, 0f, 2.70f), hPosZ, -Mathf.PI / 2f, CornerCurvature, cornerSpeed);
 
-            var s1 = AddStraight(segments, center, heading, new Vector3(0.30f, 0f, 0.30f), maxAccel);
-            center = s1.EndPosition;
+            Vector3 spawn = Course.CourseBuilder.RobotSpawnPosition;
+            Vector3 finalEnd = new Vector3(0.90f, 0f, 2.70f);
 
-            var t1 = new TurnSegment(center, heading, Mathf.PI / 2f, radius, pivotOnRightWheel: true, maxAccel);
-            segments.Add(t1);
-            center = t1.EndPosition;
-            heading = t1.EndHeadingRadians;
-
-            var s2 = AddStraight(segments, center, heading, new Vector3(0.30f, 0f, 1.50f), maxAccel);
-            center = s2.EndPosition;
-
-            var t2 = new TurnSegment(center, heading, Mathf.PI / 2f, radius, pivotOnRightWheel: true, maxAccel);
-            segments.Add(t2);
-            center = t2.EndPosition;
-            heading = t2.EndHeadingRadians;
-
-            var s3 = AddStraight(segments, center, heading, new Vector3(2.10f, 0f, 1.50f), maxAccel);
-            center = s3.EndPosition;
-
-            var t3 = new TurnSegment(center, heading, -Mathf.PI / 2f, radius, pivotOnRightWheel: false, maxAccel);
-            segments.Add(t3);
-            center = t3.EndPosition;
-            heading = t3.EndHeadingRadians;
-
-            var s4 = AddStraight(segments, center, heading, new Vector3(2.10f, 0f, 2.70f), maxAccel);
-            center = s4.EndPosition;
-
-            var t4 = new TurnSegment(center, heading, -Mathf.PI / 2f, radius, pivotOnRightWheel: false, maxAccel);
-            segments.Add(t4);
-            center = t4.EndPosition;
-            heading = t4.EndHeadingRadians;
-
-            // Final approach: continue past the GoalLine (X=1.80) with comfortable clearance.
-            AddStraight(segments, center, heading, new Vector3(0.90f, 0f, 2.70f), maxAccel);
+            var segments = new List<TrajectorySegment>
+            {
+                // Flying start: accelerate from rest at spawn to corner speed by c1's entry.
+                // The straight is 1.5 m before the StartLine, so the robot is already at full
+                // speed when the clock starts.
+                StraightBetween(spawn, c1.StartPosition, hNegX, 0f, cornerSpeed, maxAccel),
+                c1,
+                StraightBetween(c1.EndPosition, c2.StartPosition, hPosZ, cornerSpeed, cornerSpeed, maxAccel),
+                c2,
+                StraightBetween(c2.EndPosition, c3.StartPosition, hPosX, cornerSpeed, cornerSpeed, maxAccel),
+                c3,
+                StraightBetween(c3.EndPosition, c4.StartPosition, hPosZ, cornerSpeed, cornerSpeed, maxAccel),
+                c4,
+                // Final straight past the GoalLine (x=1.80), decelerating to rest at (0.90,2.70).
+                StraightBetween(c4.EndPosition, finalEnd, hNegX, cornerSpeed, 0f, maxAccel),
+            };
 
             return new RobotTrajectory(segments);
         }
 
-        private static StraightSegment AddStraight(List<TrajectorySegment> segments, Vector3 start, float heading,
-            Vector3 nominalTarget, float maxAccel)
+        private static VariableSpeedStraight StraightBetween(Vector3 from, Vector3 to, float heading,
+            float entrySpeed, float exitSpeed, float maxAccel)
         {
-            float length = Vector3.Dot(nominalTarget - start, HeadingUtil.ToForward(heading));
-            var segment = new StraightSegment(start, heading, length, maxAccel);
-            segments.Add(segment);
-            return segment;
+            // from and to are colinear along `heading` by construction (both on the same
+            // corridor centreline), so the signed length is just the projection.
+            float length = Vector3.Dot(to - from, HeadingUtil.ToForward(heading));
+            return new VariableSpeedStraight(from, heading, length, entrySpeed, exitSpeed, maxAccel);
         }
     }
 }

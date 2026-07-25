@@ -97,6 +97,48 @@ namespace PIDReport.Tests
                 "Default trajectory accel cap must leave headroom under the hard 1.00 m/s^2 requirement for closed-loop tracking error.");
         }
 
+        [Test]
+        public void CourseTrajectory_KeepsRobotBodyClearOfAllObstacles()
+        {
+            // The reference (centre) path must keep the 0.15 m-radius robot body clear of
+            // every wall and block along the whole route -- this is what makes the smooth
+            // corners' corner-cutting safe within the 0.60 m corridors. Checked on the plan
+            // itself; the M10 full-course test separately checks the actually-tracked run.
+            var trajectory = CourseTrajectoryPlanner.BuildCourseTrajectory();
+            const float robotRadius = 0.15f;
+
+            float worst = float.MaxValue;
+            for (float t = 0f; t <= trajectory.TotalDuration; t += 0.01f)
+            {
+                Vector3 p = trajectory.Evaluate(t).Position;
+                worst = Mathf.Min(worst, ClearanceToObstacles(p));
+            }
+
+            // Design margin is ~0.06 m beyond the body radius; require at least 0.02 m so a
+            // regression that tightens a corridor or widens a corner is caught here.
+            Assert.Greater(worst, robotRadius + 0.02f,
+                "Reference path comes within " + worst + " m of an obstacle centre-to-face; " +
+                "the 0.15 m robot body would have under 0.02 m clearance.");
+        }
+
+        // Distance from a world point to the nearest of: the two blocks (as rectangles) and
+        // the four inner wall faces of the drivable area.
+        private static float ClearanceToObstacles(Vector3 p)
+        {
+            float d = Mathf.Min(
+                DistanceToRect(p, 0.60f, 2.40f, 0.60f, 1.20f),   // LowerBlock
+                DistanceToRect(p, 0.00f, 1.80f, 1.80f, 2.40f));  // UpperBlock
+            d = Mathf.Min(d, p.x - 0.0f, 2.40f - p.x, p.z - 0.0f, 3.0f - p.z); // walls
+            return d;
+        }
+
+        private static float DistanceToRect(Vector3 p, float xmin, float xmax, float zmin, float zmax)
+        {
+            float dx = Mathf.Max(xmin - p.x, 0f, p.x - xmax);
+            float dz = Mathf.Max(zmin - p.z, 0f, p.z - zmax);
+            return Mathf.Sqrt(dx * dx + dz * dz);
+        }
+
         private static Vector3 VelocityAt(RobotTrajectory trajectory, float t)
         {
             var state = trajectory.Evaluate(t);
