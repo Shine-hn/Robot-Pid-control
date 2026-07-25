@@ -1,0 +1,11 @@
+{
+    "courseTimeSeconds": 11.100128173828125,
+    "startTimeSeconds": 2.7199976444244386,
+    "finishTimeSeconds": 13.820125579833985,
+    "fixedTimestepSeconds": 0.019999992102384568,
+    "telemetryDurationSeconds": 15.339993476867676,
+    "raceStarted": true,
+    "raceFinished": true,
+    "invalidated": false,
+    "invalidationReason": ""
+}
