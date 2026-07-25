@@ -45,6 +45,52 @@ namespace PIDReport.Tests
             Assert.Less(yawDrift, 2f, "Equal wheel speeds should not produce meaningful rotation.");
         }
 
+        // Genuine PID: the integral term must reject a sustained disturbance that pure
+        // proportional gain cannot. A constant 5 N drag opposing a 0.3 m/s command leaves a
+        // P-only loop with a steady error of 5/LinearGain = 0.0167 m/s (final ~0.283 m/s);
+        // the integrator supplies the 5 N itself and drives the steady speed to the command.
+        [UnityTest]
+        public IEnumerator PidIntegral_RejectsConstantDisturbance_PWouldLeaveSteadyError()
+        {
+            Build();
+            drive.SetWheelSpeeds(0.3f, 0.3f);
+
+            float finalSpeed = 0f;
+            for (int i = 0; i < 400; i++)
+            {
+                rig.Body.AddForce(-robot.transform.forward * 5f, ForceMode.Force);
+                yield return new WaitForFixedUpdate();
+                finalSpeed = Vector3.Dot(rig.Body.linearVelocity, robot.transform.forward);
+            }
+
+            // P-only would settle at ~0.283 m/s; assert the integral closed most of that gap.
+            Assert.Greater(finalSpeed, 0.295f,
+                "PID integral should reject the constant disturbance and reach ~0.30 m/s; got " + finalSpeed);
+        }
+
+        // Anti-windup: under a disturbance so large the output stays saturated and the goal is
+        // unreachable, the integrator must NOT grow without bound. Without back-calculation it
+        // would accumulate every step; with it, it settles.
+        [UnityTest]
+        public IEnumerator PidAntiWindup_BoundsIntegralUnderSustainedSaturation()
+        {
+            Build();
+            drive.SetWheelSpeeds(0.3f, 0.3f);
+
+            float maxIntegral = 0f;
+            for (int i = 0; i < 400; i++)
+            {
+                rig.Body.AddForce(-robot.transform.forward * 100f, ForceMode.Force); // 100 N >> 15 N clamp
+                yield return new WaitForFixedUpdate();
+                maxIntegral = Mathf.Max(maxIntegral, drive.LinearIntegral.magnitude);
+            }
+
+            // Un-clamped integration would reach error*dt*steps ~ many m/s over 400 steps and
+            // keep climbing; anti-windup holds it to a small bound.
+            Assert.Less(maxIntegral, 2f,
+                "Anti-windup failed: integral wound up to " + maxIntegral + " under sustained saturation.");
+        }
+
         // 後退: the assignment requires reverse as one of the five mandatory maneuvers
         // (前進/後退/停止/信地旋回/超信地旋回). Equal NEGATIVE wheel speeds must drive the
         // body backwards along its own -forward axis without yawing.

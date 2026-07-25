@@ -35,8 +35,46 @@ namespace PIDReport.Control
         // k > 2 makes the loop numerically oscillate/overshoot every step regardless of how
         // "correct" the gain looks in continuous time. With yaw inertia ~0.1125 kg*m^2 and
         // fixedDeltaTime 0.02s, AngularGain must stay well under 0.1125*2/0.02 = 11.25.
-        public float LinearGain = 300f;
-        public float AngularGain = 3f;
+        // --- PID inner loop -------------------------------------------------------------
+        // Each chassis channel (linear velocity, yaw rate) is tracked by a full PID, not just
+        // proportional gain:
+        //   * P (LinearGain / AngularGain) is the bulk of the response.
+        //   * I (LinearKi / AngularKi) removes the small steady lag that pure P leaves while
+        //     chasing a continuously accelerating / turning reference -- the error P alone
+        //     needs to hold a nonzero output is integrated away instead.
+        //   * D (LinearKd / AngularKd) adds damping so the I term cannot make the loop ring;
+        //     taken on the MEASUREMENT (-d(velocity)/dt), not the error, so a step in the
+        //     commanded setpoint does not produce a derivative "kick" (a jerk spike).
+        // Integral gains are kept well into the overdamped range
+        //   (zeta = Kp / (2*sqrt(Ki*inertia)): linear ~4.7, angular ~3.2)
+        // so adding I never introduces oscillation -- oscillation would directly worsen the
+        // scored jerk. Anti-windup is by back-calculation (see FixedUpdate): while the output
+        // is saturated at the acceleration clamp, the integrator is bled back toward the
+        // achievable value instead of winding up and overshooting on release.
+        //
+        // Gains are also kept modest against the force/torque budget so no single term can
+        // dominate: with a ~15 N force clamp, the D term (Kd * measured accel) stays a few N
+        // at the ~1 m/s^2 accelerations seen here, and the I term supplies only the small
+        // residual the P term would otherwise hold an error to provide.
+        //
+        // The Kanayama trajectory-tracking law upstream (TrajectoryTrackingController) is a
+        // separate state-feedback controller and is deliberately left untouched: this PID
+        // regulates the chassis to whatever (v, omega) that law commands.
+        public float LinearGain = 300f;   // linear P
+        public float LinearKi = 100f;     // linear I
+        public float LinearKd = 3f;       // linear D (on measurement)
+        public float AngularGain = 3f;    // yaw P
+        public float AngularKi = 2f;      // yaw I
+        public float AngularKd = 0.05f;   // yaw D (on measurement)
+
+        // Anti-windup by CONDITIONAL INTEGRATION plus an integral clamp. The integrator only
+        // accumulates when the output is not saturated (or when the error is trying to pull
+        // the output back out of saturation), and the accumulated integral term is capped so
+        // it can never command more than the actuator can deliver. These caps are the maximum
+        // FORCE / TORQUE the integral term alone is allowed to contribute (N and N*m); the
+        // stored integral is those divided by Ki.
+        public float LinearIntegralTermMax = 15f;   // = MaxAcceleration * mass
+        public float AngularIntegralTermMax = 4.5f; // = MaxAngularAcceleration * Iyy
 
         // Real motor controllers always saturate; this one should too, both to guard
         // against a "zero moment point" tip-over (centerOfMass 0.5m above a ~0.15m-radius
@@ -99,8 +137,19 @@ namespace PIDReport.Control
         private float wheelSpeedLeft;
         private float wheelSpeedRight;
 
+        // PID state.
+        private Vector3 linearIntegral;
+        private float angularIntegral;
+        private Vector3 prevLinearVel;
+        private float prevAngularVel;
+        private bool hasPrevMeasurement;
+
         public float CommandedLinearSpeed => (wheelSpeedLeft + wheelSpeedRight) * 0.5f;
         public float CommandedAngularSpeed => (wheelSpeedLeft - wheelSpeedRight) / RobotRig.TrackWidth;
+
+        // Exposed for the anti-windup regression test.
+        public Vector3 LinearIntegral => linearIntegral;
+        public float AngularIntegral => angularIntegral;
 
         void Awake()
         {
@@ -120,11 +169,29 @@ namespace PIDReport.Control
             float v = CommandedLinearSpeed;
             float omega = CommandedAngularSpeed;
 
+            float dt = Time.fixedDeltaTime;
+
             Vector3 desiredVel = transform.forward * v;
             Vector3 currentVel = rb.linearVelocity;
             currentVel.y = 0f;
             Vector3 velError = desiredVel - currentVel;
-            Vector3 force = Vector3.ClampMagnitude(velError * LinearGain, MaxAcceleration * rb.mass);
+
+            // PID: P on error, I on accumulated error, D on the MEASUREMENT (-d(vel)/dt) so a
+            // setpoint step gives no derivative kick. Integral is used before it is updated.
+            Vector3 linVelDeriv = hasPrevMeasurement ? (currentVel - prevLinearVel) / dt : Vector3.zero;
+            Vector3 unclampedForce = LinearGain * velError + LinearKi * linearIntegral - LinearKd * linVelDeriv;
+            float maxForce = MaxAcceleration * rb.mass;
+            Vector3 force = Vector3.ClampMagnitude(unclampedForce, maxForce);
+
+            // Conditional-integration anti-windup: accumulate only when not saturated, or when
+            // the error opposes the saturation direction (so the integrator can unwind). Then
+            // hard-clamp the integral term so it can never demand more than the actuator gives.
+            bool linSaturated = unclampedForce.magnitude > maxForce;
+            if (!linSaturated || Vector3.Dot(velError, unclampedForce) < 0f)
+            {
+                linearIntegral += velError * dt;
+                linearIntegral = Vector3.ClampMagnitude(linearIntegral, LinearIntegralTermMax / LinearKi);
+            }
 
             // Feed-forward cancellation of the solver's contact friction (see above).
             // Applied OUTSIDE the clamp because it is loss compensation, not commanded
@@ -151,7 +218,23 @@ namespace PIDReport.Control
             float currentAngVelY = rb.angularVelocity.y;
             float angError = omega - currentAngVelY;
             float maxTorque = MaxAngularAcceleration * rb.inertiaTensor.y;
-            float torque = Mathf.Clamp(angError * AngularGain, -maxTorque, maxTorque);
+
+            // Same PID structure and conditional-integration anti-windup on the yaw channel.
+            float angVelDeriv = hasPrevMeasurement ? (currentAngVelY - prevAngularVel) / dt : 0f;
+            float unclampedTorque = AngularGain * angError + AngularKi * angularIntegral - AngularKd * angVelDeriv;
+            float torque = Mathf.Clamp(unclampedTorque, -maxTorque, maxTorque);
+
+            bool angSaturated = Mathf.Abs(unclampedTorque) > maxTorque;
+            if (!angSaturated || angError * unclampedTorque < 0f)
+            {
+                angularIntegral += angError * dt;
+                float angIntMax = AngularIntegralTermMax / AngularKi;
+                angularIntegral = Mathf.Clamp(angularIntegral, -angIntMax, angIntMax);
+            }
+
+            prevLinearVel = currentVel;
+            prevAngularVel = currentAngVelY;
+            hasPrevMeasurement = true;
 
             // Yaw contact drag is deliberately NOT compensated. It was tried, and it is
             // actively harmful: a torque along sign(omega) is anti-damping, so any small
