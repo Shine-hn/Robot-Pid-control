@@ -53,6 +53,40 @@ namespace PIDReport.Tests
                 "spin turn when mounted on the yaw axis, but saw " + maxAccelMagnitude + " m/s^2.");
         }
 
+        // Cross-validation of the two independent camera-top acceleration computations:
+        // GetPointVelocity finite-difference vs the explicit EOM decomposition
+        // a = a_CoM + alpha x r + omega x (omega x r). Under a pivot turn (translating AND
+        // rotating) both the base and rotational terms are exercised; the two methods must
+        // agree, confirming the explicit EOM is correct.
+        [UnityTest]
+        public IEnumerator ExplicitEomAcceleration_MatchesGetPointVelocityMethod()
+        {
+            Build();
+            drive.SetWheelSpeeds(0f, 0.3f); // pivot: v != 0 and omega != 0
+
+            float worstMismatch = 0f;
+            float maxMagnitude = 0f;
+            for (int i = 0; i < 150; i++)
+            {
+                yield return new WaitForFixedUpdate();
+                // Skip the first couple of steps where each method's finite-difference state
+                // is still priming (different warm-up lengths).
+                if (i < 3) continue;
+                Vector3 byPointVel = kinematics.HorizontalAcceleration;
+                Vector3 byEom = kinematics.HorizontalAccelerationEOM;
+                worstMismatch = Mathf.Max(worstMismatch, (byPointVel - byEom).magnitude);
+                maxMagnitude = Mathf.Max(maxMagnitude, byPointVel.magnitude);
+            }
+
+            Assert.Greater(maxMagnitude, 0.05f,
+                "Test is only meaningful if the camera-top actually accelerated; it did not.");
+            // Both are finite differences at dt=0.02 s, so a small discretization gap is
+            // expected; require them within 5% of the peak magnitude (plus a tiny floor).
+            Assert.Less(worstMismatch, 0.05f * maxMagnitude + 0.02f,
+                "Explicit EOM acceleration disagrees with the GetPointVelocity method by " +
+                worstMismatch + " m/s^2 (peak " + maxMagnitude + ").");
+        }
+
         [UnityTest]
         public IEnumerator PivotTurn_CameraTopAccelerationMatchesChassisAcceleration()
         {

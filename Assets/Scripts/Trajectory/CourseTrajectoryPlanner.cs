@@ -43,8 +43,19 @@ namespace PIDReport.Trajectory
         // fit inside the shortest (1.2 m) straight. Within that, a GENTLER corner is strictly
         // better on both scored axes: corner speed v = sqrt(maxAccel/kappa) rises as kappa
         // falls, and clothoid jerk (v^3 * kappa^2 = maxAccel^1.5 * sqrt(kappa)) falls with it.
-        // kappa = 6 gives corner speed ~0.36 m/s with a 0.31 m setback -- comfortably inside
-        // the 0.6 m half-straight -- so it is close to the fastest, smoothest feasible corner.
+        // Corner curvature, chosen as the JERK-LIMITED minimum-time operating point -- not
+        // the raw minimum-time one. The straights are already bang-bang in acceleration
+        // (min-jerk S-curve to a length-limited peak) and the corners already sit at the
+        // lateral-acceleration bound, so the only remaining freedom is kappa. Lower kappa =
+        // gentler, faster corner (v = sqrt(maxAccel/kappa)); the clearance constraint binds
+        // at kappa ~= 5 (kappa = 4 drops the body gap below 0.15 m). But the pure-minimum-time
+        // choice (kappa = 5) was measured and rejected: it cut course time 11.10 -> 10.58 s
+        // (-5%) while pushing measured camera-top jerk 4.25 -> 5.24 m/s^3 (+23%), because the
+        // faster corners drive sharper tracked transitions. 走破時間 and ジャークの小ささ are
+        // co-equal scoring criteria, so trading a large jerk rise for a small time gain is a
+        // net loss. kappa = 6 is the knee of that time-vs-jerk curve: a comfortable 0.31 m
+        // setback, and the smoothest run that still captures essentially all of the arc-corner
+        // time saving over the old stop/turn/go route (16.96 s -> 11.10 s).
         public const float CornerCurvature = 6f;
 
         public static RobotTrajectory BuildCourseTrajectory(float maxAccel = DefaultMaxAccel)

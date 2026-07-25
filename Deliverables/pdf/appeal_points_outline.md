@@ -242,3 +242,88 @@ produced μ=0.36 via Average combine — a real latent bug this work surfaced.
   re-validates earlier stages whenever a later-stage fix touches shared code (e.g. the
   M10 collider/solver fixes were re-verified against the full 35-test suite, not just
   the one full-course test).
+
+## 11. Compliance/optimization pass (the material with the most "appeal")
+
+This is the part of the work most worth writing up: an independent audit against the
+assignment PDF (not our internal brief) drove a series of measured, principled changes.
+
+### 11a. Continuous-motion arc corners — the big time win (④ trajectory, ③ min-time)
+
+- The original route was stop / turn-in-place / go: every corner decelerated to zero,
+  spun, then re-accelerated. Segment analysis of the telemetry showed **~39% of the
+  timed run was spent at a crawl or standstill** — almost entirely corner stops.
+- Replaced with a **continuous-motion trajectory**: clothoid (Euler-spiral) corners
+  joined by speed-profiled straights, speed never returning to zero between start and
+  goal. Result: **走破時間 16.96 s → 11.08 s (−35%)**, and — critically — **max jerk also
+  fell, 6.25 → 4.28 m/s³**. Both scored axes improved at once; no trade.
+- Why clothoid, not a plain circular arc: a constant-radius arc steps curvature from 0
+  to 1/R in one physics step, so the centripetal term v²/R (and thus lateral
+  acceleration) appears instantaneously → a ~7× jerk spike at every corner entry/exit.
+  The clothoid ramps curvature smoothly (raised-cosine in arc length), so lateral
+  acceleration and jerk both start and end at exactly zero and join the straights with
+  no discontinuity. This is the same idea as a railway/highway transition spiral.
+- Corner sizing is geometry-first and counter-intuitive: the 0.60 m corridor with a
+  0.30 m robot leaves only 0.15 m of clearance, and a measured sweep (with corners
+  correctly placed on the centrelines) showed the body gap is fixed at 0.15 m by the
+  centreline-to-wall distance for *any* curvature ≥ ~5 — the tight corner never cuts
+  closer to the inner block than the straights do. So a gentler corner is strictly
+  better on both scored axes (higher corner speed √(maxAccel/κ), lower clothoid jerk
+  ∝ √κ), bounded only by the setback fitting the shortest straight.
+
+### 11b. Jerk-limited minimum-time, and why we did NOT take the fastest option (③)
+
+- The straights are bang-bang in acceleration (min-jerk S-curve to a length-limited
+  peak, hitting the acceleration budget on both the accelerate and decelerate halves),
+  and the corners sit exactly at the lateral-acceleration bound. Both constraints are
+  therefore *active* — the hallmark of a time-optimal solution — making this a genuine
+  **jerk-limited minimum-time trajectory** (the S-curve / practical form of minimum-time
+  control, not naive bang-bang).
+- The one remaining freedom, corner curvature κ, was pushed to the clearance boundary
+  and *measured*: the pure-minimum-time choice (κ = 5) cuts course time 11.10 → 10.58 s
+  (−5%) but pushes measured jerk 4.25 → 5.24 m/s³ (+23%). Because 走破時間 and
+  ジャークの小ささ are co-equal criteria, that is a net loss, so κ = 6 (the knee of the
+  time-vs-jerk curve) was chosen deliberately. Worth presenting as evidence of
+  optimizing the *right* objective rather than just the clock.
+
+### 11c. Genuine PID inner loop (② PID), distinct from the Kanayama law (⑤)
+
+- Two nested closed loops, and they are genuinely different controllers — worth keeping
+  distinct in the writeup so ② and ⑤ are both clearly earned:
+  - Outer: the Kanayama unicycle trajectory-tracking law (Lyapunov state feedback) —
+    decides *what* chassis (v, ω) to command from the robot-frame pose error. (⑤)
+  - Inner: a full **PID** on each chassis channel (linear velocity, yaw rate) that turns
+    those commands into force/torque. It has a real integral term (removes the steady
+    lag pure P leaves while chasing an accelerating reference), a real derivative term
+    taken on the *measurement* (−d(v)/dt, so a setpoint step gives no derivative-kick
+    jerk spike), and **anti-windup** by conditional integration + integral clamp. (②)
+- Integral gains held well overdamped (ζ ≈ 4.7 linear, 3.2 yaw) specifically so adding I
+  cannot make the loop ring — ringing would show up directly as jerk.
+- Two regression tests prove the terms are real: one shows the integral rejects a
+  constant disturbance that pure-P leaves a steady error under; the other shows
+  anti-windup keeps the integral bounded under sustained saturation.
+
+### 11d. Explicit camera-top acceleration EOM, cross-validated (① EOM modelling)
+
+- The camera-top acceleration is computed the primary way by finite-differencing
+  `Rigidbody.GetPointVelocity()`, and *also* the explicit rigid-body way, term by term:
+  **a_point = a_CoM + α × r + ω × (ω × r)** (base + tangential + centripetal). A
+  regression test asserts the two agree during a pivot — the built-in method is thereby
+  cross-validated against the hand-derived EOM.
+- The explicit form makes an otherwise-hidden result visible and is the crux of the
+  acceleration-cap strategy: r points from the CoM straight up the pole to the camera on
+  the **yaw axis**, so for a pure yaw (ω and r both vertical) *both* rotational terms
+  vanish (ω × r = 0). That is exactly why a spin-in-place adds essentially no camera-top
+  acceleration, and why camera-top ≈ chassis acceleration except for the small term from
+  any body tilt. Mounting the camera on the yaw axis is what makes the whole
+  acceleration budget spendable on translation.
+
+### 11e. Deliverable correctness (from the audit)
+
+- 走破時間 in the metrics PDF was originally the whole telemetry span (spawn runway +
+  post-goal tail), ~4 s too long on a 20-point criterion; now the true StartLine-touch →
+  GoalLine-clearance interval from RaceManager. Fixed Timestep (0.02 s) added. Metrics
+  relabelled in the assignment's own Japanese wording, and every acceleration metric
+  reported for **both** the camera-top point and the chassis (合成加速度 is ambiguous).
+- Finish condition tightened to require passing *through* the goal line (opposite side),
+  not merely leaving its trigger — so reversing back out cannot stop the clock.
