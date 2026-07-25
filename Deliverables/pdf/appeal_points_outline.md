@@ -181,6 +181,15 @@ releases static friction abruptly, and that step is amplified by the camera-top
 point's 0.5 m lever arm above the CoM. Attribution was confirmed by re-running with
 μ = 0 while keeping every other change — jerk fell from 98.5 to 2.28.
 
+The one remaining hope was that the continuous-motion trajectory (arc corners, which
+removed the four corner stops — see §6) would reduce stick-slip enough to carry a
+nonzero coefficient. It was re-tested once on that faster trajectory: μ = 0.05 still
+peaked at **2.11 m/s²** (cap 1.00) with jerk 134.8. Even with only two stick-slip
+events left — the flying start and the final stop — a single abrupt static-friction
+release at the camera-top lever arm is enough to blow the cap. Friction and the
+1.00 m/s² requirement are fundamentally incompatible under this contact model,
+independent of how few stops the route has.
+
 So modelling sliding friction does not make the simulation *more* faithful; it makes
 it less faithful (a skidding sled) **and** breaks the 1.00 m/s² 必須条件 while
 destroying the 加速度・ジャークの小ささ score. Choosing μ = 0 is the choice that
