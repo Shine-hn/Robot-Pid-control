@@ -258,6 +258,46 @@ namespace PIDReport.App
             ColorizeChild(robot.transform, "CameraHead", headMat);
             ColorizeChild(robot.transform, "WheelLeft", wheelMat);
             ColorizeChild(robot.transform, "WheelRight", wheelMat);
+
+            // Paint the Start (red) and Goal (green) lines on the floor so the video shows the
+            // robot touching the start line and crossing the goal, matching the assignment map.
+            AddLineMarker("StartLine", new Color(0.90f, 0.10f, 0.12f));
+            AddLineMarker("GoalLine", new Color(0.15f, 0.80f, 0.20f));
+        }
+
+        // A flat colored decal on the floor marking a timing line. Purely visual: it is
+        // DERIVED FROM the actual trigger object CourseBuilder created (its world position and
+        // BoxCollider Z-extent), so the marker can never drift from where the trigger really
+        // is. It carries no collider and no Rigidbody, so it changes nothing about the physics
+        // run -- only what is drawn.
+        private void AddLineMarker(string lineName, Color color)
+        {
+            var line = course.transform.Find(lineName);
+            if (line == null) return;
+            var box = line.GetComponent<BoxCollider>();
+            if (box == null) return;
+
+            // The trigger's transform position IS the line's centre (box.center = 0, scale 1),
+            // and box.size.z is its Z span -- read them directly rather than re-typing coords.
+            Vector3 center = line.position;
+            float zSpan = box.size.z;
+
+            var marker = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            marker.name = lineName + "Marker";
+            var col = marker.GetComponent<Collider>();
+            if (col != null) Destroy(col); // render-only: no physics footprint
+            marker.transform.SetParent(course.transform, false);
+
+            // Centre on the trigger in X/Z; sit just above the floor top (Y=0) to avoid
+            // z-fighting. A ~0.06 m painted-line width in X, the trigger's full span in Z.
+            marker.transform.position = new Vector3(center.x, 0.003f, center.z);
+            marker.transform.localScale = new Vector3(0.06f, 0.004f, zSpan);
+
+            // Emissive so the line reads as bright paint regardless of the lighting angle.
+            var mat = new Material(Shader.Find("Standard")) { color = color };
+            mat.EnableKeyword("_EMISSION");
+            mat.SetColor("_EmissionColor", color * 0.65f);
+            marker.GetComponent<Renderer>().sharedMaterial = mat;
         }
 
         private static Material MakeMat(Color c)
